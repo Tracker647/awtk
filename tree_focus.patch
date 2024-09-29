@@ -1,0 +1,1024 @@
+diff --git a/awtk_config.py b/awtk_config.py
+index b26f3e2a1..36c4d71cb 100644
+--- a/awtk_config.py
++++ b/awtk_config.py
+@@ -46,12 +46,12 @@ VGCANVAS = complie_helper.get_value('VGCANVAS', VGCANVAS)
+ 
+ if OS_NAME == 'Windows':
+     TK_ROOT = TK_ROOT.replace('\\', '\\\\')
+-NANOVG_BACKEND = 'GL3'
++# NANOVG_BACKEND = 'GL3'
+ 
+ # NANOVG_BACKEND='GLES2'
+ # NANOVG_BACKEND='GLES3'
+ # NANOVG_BACKEND='AGG'
+-# NANOVG_BACKEND='AGGE'
++NANOVG_BACKEND='AGGE'
+ # NANOVG_BACKEND='GL2'
+ NANOVG_BACKEND = complie_helper.get_value('NANOVG_BACKEND', NANOVG_BACKEND)
+ #NANOVG_BACKEND='BGFX'
+@@ -59,13 +59,13 @@ NANOVG_BACKEND = complie_helper.get_value('NANOVG_BACKEND', NANOVG_BACKEND)
+ FRAME_BUFFER_FORMAT = ''
+ if VGCANVAS == 'CAIRO':
+     LCD = 'SDL_FB'
+-    FRAME_BUFFER_FORMAT = 'bgr565'
+-    # FRAME_BUFFER_FORMAT='bgra8888'
++    # FRAME_BUFFER_FORMAT = 'bgr565'
++    FRAME_BUFFER_FORMAT='bgra8888'
+ else:
+     if NANOVG_BACKEND == 'AGGE' or NANOVG_BACKEND == 'AGG':
+         LCD = 'SDL_FB'
+-        FRAME_BUFFER_FORMAT = 'bgr565'
+-        # FRAME_BUFFER_FORMAT='bgra8888'
++        # FRAME_BUFFER_FORMAT = 'bgr565'
++        FRAME_BUFFER_FORMAT='bgra8888'
+     else:
+         LCD = 'SDL_GPU'
+ # LCD='SDL_FB_MONO'
+diff --git a/awtk_config_common.py b/awtk_config_common.py
+index 32c79c9e7..1bc825b92 100644
+--- a/awtk_config_common.py
++++ b/awtk_config_common.py
+@@ -74,10 +74,10 @@ GTEST_ROOT = joinPath(TK_ROOT, '3rd/gtest/googletest')
+ TKC_STATIC_LIBS = ['debugger', 'fscript_ext', 'streams', 'romfs', 'conf_io', 'hal', 'xml', 'charset',
+                    'csv', 'ubjson', 'compressors', 'miniz', 'tkc_core', 'mbedtls']
+ 
+-TOOLS_NAME = ''
++# TOOLS_NAME = ''
+ NANOVG_BACKEND = ''
+ NATIVE_WINDOW = ''
+-#TOOLS_NAME = 'mingw'
++TOOLS_NAME = 'mingw'
+ TOOLS_NAME = complie_helper.get_value('TOOLS_NAME', TOOLS_NAME)
+ 
+ if OS_NAME == 'Windows':
+diff --git a/src/base/widget.c b/src/base/widget.c
+index d7633b9cb..6077a8440 100644
+--- a/src/base/widget.c
++++ b/src/base/widget.c
+@@ -49,11 +49,14 @@
+ #include "blend/image_g2d.h"
+ #include "base/style_const.h"
+ #include "base/widget_visible_in_scroll_view.inc"
++#include "base/widget_tree_focus_manager.h"
+ 
+ ret_t widget_focus_up(widget_t* widget);
+ ret_t widget_focus_down(widget_t* widget);
+ ret_t widget_focus_left(widget_t* widget);
+ ret_t widget_focus_right(widget_t* widget);
++ret_t widget_focus_parent(widget_t *widget);
++ret_t widget_focus_children(widget_t *widget);
+ static ret_t widget_unref_async(widget_t* widget);
+ static ret_t widget_ensure_style_mutable(widget_t* widget);
+ static ret_t widget_dispatch_blur_event(widget_t* widget);
+@@ -2150,7 +2153,7 @@ ret_t widget_set_prop(widget_t* widget, const char* name, const value_t* v) {
+   e.name = name;
+   e.e = event_init(EVT_PROP_WILL_CHANGE, widget);
+   widget_dispatch(widget, (event_t*)&e);
+-
++  
+   if (tk_str_eq(name, WIDGET_PROP_X)) {
+     widget_set_x(widget, (xy_t)value_int(v), TRUE);
+   } else if (tk_str_eq(name, WIDGET_PROP_Y)) {
+@@ -2761,10 +2764,19 @@ static bool_t widget_is_move_focus_right_key(widget_t* widget, key_event_t* e) {
+   return widget_match_key(widget, WIDGET_PROP_MOVE_FOCUS_RIGHT_KEY, e);
+ }
+ 
++static bool_t widget_is_move_focus_parent_key(widget_t* widget, key_event_t* e) {
++  return widget_match_key(widget, WIDGET_PROP_MOVE_FOCUS_PARENT_KEY, e);
++}
++
++static bool_t widget_is_move_focus_children_key(widget_t* widget, key_event_t* e) {
++  return widget_match_key(widget, WIDGET_PROP_MOVE_FOCUS_CHILDREN_KEY, e);
++}
++
+ bool_t widget_is_change_focus_key(widget_t* widget, key_event_t* e) {
+   return widget_is_move_focus_prev_key(widget, e) || widget_is_move_focus_next_key(widget, e) ||
+          widget_is_move_focus_up_key(widget, e) || widget_is_move_focus_down_key(widget, e) ||
+-         widget_is_move_focus_left_key(widget, e) || widget_is_move_focus_right_key(widget, e);
++         widget_is_move_focus_left_key(widget, e) || widget_is_move_focus_right_key(widget, e) ||
++         widget_is_move_focus_parent_key(widget, e) || widget_is_move_focus_children_key(widget, e);
+ }
+ 
+ static ret_t widget_on_keydown_general(widget_t* widget, key_event_t* e) {
+@@ -2809,6 +2821,16 @@ static ret_t widget_on_keydown_general(widget_t* widget, key_event_t* e) {
+         ret = RET_STOP;
+         widget_focus_right(widget);
+       }
++    } else if (widget_is_move_focus_parent_key(widget, e)) {
++      if(widget_is_focusable(widget)) {
++        ret = RET_STOP;
++        widget_focus_parent(widget);
++      }
++    } else if (widget_is_move_focus_children_key(widget, e)) {
++      if(widget_is_focusable(widget)) {
++        ret = RET_STOP;
++        widget_focus_children(widget);
++      }
+     }
+   }
+ 
+@@ -4593,6 +4615,17 @@ ret_t widget_focus_right(widget_t* widget) {
+   }
+ }
+ 
++
++ret_t widget_focus_parent(widget_t* widget) {
++  widget_t *win = widget_get_window(widget);
++  return widget_tree_focus_move_parent(WINDOW_BASE(win)->tree_focus_manager, widget);
++}
++
++ret_t widget_focus_children(widget_t* widget) {
++  widget_t *win = widget_get_window(widget);
++  return widget_tree_focus_move_children(WINDOW_BASE(win)->tree_focus_manager, widget);
++}
++
+ bool_t widget_is_window(widget_t* widget) {
+   return_value_if_fail(widget != NULL && widget->vt != NULL, FALSE);
+ 
+diff --git a/src/base/widget_consts.h b/src/base/widget_consts.h
+index 023ac56ca..e4242627c 100644
+--- a/src/base/widget_consts.h
++++ b/src/base/widget_consts.h
+@@ -1045,6 +1045,20 @@ BEGIN_C_DECLS
+  */
+ #define WIDGET_PROP_MOVE_FOCUS_RIGHT_KEY "move_focus_right_key"
+ 
++
++/**
++ * @const WIDGET_PROP_MOVE_FOCUS_PARENT_KEY
++ * 将焦点移到父控件的键值。
++ */ 
++#define WIDGET_PROP_MOVE_FOCUS_PARENT_KEY "move_focus_parent_key"
++
++/**
++ * @const WIDGET_PROP_MOVE_FOCUS_CHILDREN_KEY 
++ * 将焦点移到子控件的键值
++ */
++#define WIDGET_PROP_MOVE_FOCUS_CHILDREN_KEY "move_focus_children_key"
++
++
+ /**
+  * @const WIDGET_PROP_ROWS
+  * 行数。
+diff --git a/src/base/widget_tree_focus_manager.c b/src/base/widget_tree_focus_manager.c
+new file mode 100644
+index 000000000..cdc3b1395
+--- /dev/null
++++ b/src/base/widget_tree_focus_manager.c
+@@ -0,0 +1,136 @@
++#include "widget_tree_focus_manager.h"
++#include "tkc/mem.h"
++#include <stdbool.h>
++
++
++static ret_t widget_print_all_focusable_widgets(darray_t *all_focusable)
++{
++	return_value_if_fail(all_focusable, RET_FAIL);
++	for (int i = 0; i < all_focusable->size; i++)
++	{
++		if (all_focusable->elms[i])
++		{
++			printf("widget_print_all_focusable_widgets>find widget name: %s at %#x\r\n", WIDGET(all_focusable->elms[i])->name, WIDGET(all_focusable->elms[i]));
++		}
++	}
++	return RET_OK;
++}
++
++/**
++ * @brief 查找以widget为根节点下的所有可聚焦子控件，记录在all_focusable数组上 
++ * 
++ * @param [in] widget 
++ * @param [out] all_focusable 
++ * @return ret_t 
++ */
++static ret_t widget_get_all_focusable_widgets(widget_t *widget, darray_t *all_focusable)
++{
++	widget_foreach(widget, widget_on_visit_focusable, all_focusable);
++	return_value_if_fail(widget != NULL, RET_FAIL);
++	return_value_if_fail(all_focusable != NULL && all_focusable->size > 0, RET_FAIL);
++	return RET_OK;
++}
++
++static ret_t widget_set_all_focusable(darray_t *all_focusable, bool flag)
++{
++	return_value_if_fail(all_focusable, RET_FAIL);
++	for (int i = 0; i < all_focusable->size; i++)
++	{
++		if (all_focusable->elms[i])
++		{
++			widget_set_focusable(WIDGET(all_focusable->elms[i]), flag);
++		}
++	}
++	return RET_OK;
++}
++
++static ret_t widget_set_all_focused(darray_t *all_focusable, bool flag)
++{
++	return_value_if_fail(all_focusable, RET_FAIL);
++	for (int i = 0; i < all_focusable->size; i++)
++	{
++		if (all_focusable->elms[i])
++		{
++			widget_set_prop_bool(WIDGET(all_focusable->elms[i]), WIDGET_PROP_FOCUSED, flag);
++		}
++	}
++	return RET_OK;
++}
++
++widget_tree_focus_manager_t* widget_tree_focus_manager_create(widget_t *win){
++    return_value_if_fail(win != NULL, NULL);
++    widget_tree_focus_manager_t *manager = TKMEM_ZALLOC(widget_tree_focus_manager_t);
++    manager->win = win;
++    manager->g_focus_widget_list_stack = darray_create(10, NULL, NULL);
++    manager->g_focus_widget_stack = darray_create(10, NULL, NULL);
++    return manager;
++}
++
++ret_t widget_tree_focus_move_parent(widget_tree_focus_manager_t* manager, widget_t *focused_widget){
++    return_value_if_fail(manager != NULL, RET_BAD_PARAMS);
++    darray_t *g_focus_widget_list_stack = manager->g_focus_widget_list_stack;
++    darray_t *g_focus_widget_stack = manager->g_focus_widget_stack;
++    widget_t *win = manager->win;
++    ret_t ret = RET_OK;
++    if (g_focus_widget_list_stack->size == 0)
++    {
++        printf("no focusable parent widget\r\n");
++        return RET_STOP;
++    }
++    /* 恢复父层控件的可聚焦性 */
++    darray_t *parent_focusable_widget_list = darray_pop(g_focus_widget_list_stack);
++    focused_widget = darray_pop(g_focus_widget_stack);
++    ret = widget_set_all_focusable(parent_focusable_widget_list, TRUE);
++    ret = widget_set_all_focused(parent_focusable_widget_list, FALSE);
++    ret = widget_set_focused(focused_widget, TRUE);
++
++    ret = darray_destroy(parent_focusable_widget_list);
++    return ret;
++}
++
++ret_t widget_tree_focus_move_children(widget_tree_focus_manager_t* manager, widget_t *focused_widget){
++    return_value_if_fail(manager != NULL, RET_BAD_PARAMS);
++    darray_t *g_focus_widget_list_stack = manager->g_focus_widget_list_stack;
++    darray_t *g_focus_widget_stack = manager->g_focus_widget_stack;
++    widget_t *win = manager->win;
++    ret_t ret = RET_OK;
++
++    /* parent_focusable_widget_list的生命周期：在widget_tree_focus_move_children创建， 赋值入栈，在widget_tree_focus_move_parent出栈，销毁 */
++    darray_t *parent_focusable_widget_list = darray_create(10, NULL, NULL);
++    widget_get_all_focusable_widgets(win, parent_focusable_widget_list);
++    
++    /* child_focusable_widget_list的生命周期：比较简单，本函数内创建赋值，完成查找所有可聚焦子控件的任务后销毁 */
++    darray_t *child_focusable_widget_list = darray_create(10, NULL, NULL);
++    widget_get_all_focusable_widgets(focused_widget, child_focusable_widget_list);
++    darray_remove(child_focusable_widget_list, focused_widget);
++
++    if (child_focusable_widget_list->size > 0)
++    {
++        /* 屏蔽当前控件以上所有父层子控件，并聚焦当前控件的第一个子控件 */
++        widget_set_all_focusable(parent_focusable_widget_list, FALSE);
++        widget_set_all_focusable(child_focusable_widget_list, TRUE);
++        widget_set_all_focused(parent_focusable_widget_list, FALSE);
++        widget_set_focused(WIDGET(child_focusable_widget_list->elms[0]), TRUE);
++        
++        /* 保存这些取消聚焦的控件列表和前一个聚焦控件，以便在widget_tree_focus_move_parent中出栈恢复 */
++        darray_push(g_focus_widget_list_stack, parent_focusable_widget_list);
++        darray_push(g_focus_widget_stack, focused_widget);
++    }
++    else
++    {
++        printf("no focusable child widget\r\n");
++    }
++    ret = darray_destroy(child_focusable_widget_list);
++    return ret;
++}
++
++ret_t widget_tree_focus_manager_destroy(widget_tree_focus_manager_t *manager)
++{
++    if(manager == NULL){
++        return RET_OK;
++    }
++    darray_destroy(manager->g_focus_widget_stack);
++    darray_destroy(manager->g_focus_widget_list_stack);
++    TKMEM_FREE(manager);
++    return RET_OK;
++}
+\ No newline at end of file
+diff --git a/src/base/widget_tree_focus_manager.h b/src/base/widget_tree_focus_manager.h
+new file mode 100644
+index 000000000..3cd3bcf50
+--- /dev/null
++++ b/src/base/widget_tree_focus_manager.h
+@@ -0,0 +1,37 @@
++#ifndef WIDGET_TREE_FOCUS_MANAGER_H
++#define WIDGET_TREE_FOCUS_MANAGER_H
++#include "tkc/darray.h"
++#include "base/widget.h"
++BEGIN_C_DECLS
++/**
++ * @brief 当窗口基于控件树的"层级逻辑"进行焦点切换时，采用此类进行管理
++ *  该类非单例，每个窗口对象都有一个这样的widget_tree_focus_manager_t对象
++ * （如果切换到子控件，focusable控件将切换为子控件内部的所有的focusable控件，并屏蔽外部父层及以上的focusable控件）
++ * 在xml上的使用方法例：
++ * <window name="focus_test_window" style:normal:bg_color="#1A2F4A" move_focus_up_key="up" move_focus_down_key="down" move_focus_left_key="left" move_focus_right_key="right"  move_focus_children_key="RETURN" move_focus_parent_key="ESCAPE">
++ ...
++ </window>
++ * 
++ */
++typedef struct {
++    widget_t *win;
++    /**
++     * @brief 进入子控件层时，将上层开始的所有focusable控件list压栈到此
++     * 
++     */
++    darray_t *g_focus_widget_list_stack;
++    /**
++     * @brief 进入子控件层时，将前一个聚焦的控件的压栈至此
++     * 
++     */
++    darray_t *g_focus_widget_stack;
++} widget_tree_focus_manager_t;
++
++widget_tree_focus_manager_t* widget_tree_focus_manager_create(widget_t *win);
++ret_t widget_tree_focus_move_parent(widget_tree_focus_manager_t* manager, widget_t *focused_widget);
++ret_t widget_tree_focus_move_children(widget_tree_focus_manager_t* manager, widget_t *focused_widget);
++ret_t widget_tree_focus_manager_destroy(widget_tree_focus_manager_t *manager);
++
++
++END_C_DECLS
++#endif  /* WIDGET_TREE_FOCUS_MANAGER_H */
+\ No newline at end of file
+diff --git a/src/base/window_base.c b/src/base/window_base.c
+index e7dcad28e..6015b4f47 100644
+--- a/src/base/window_base.c
++++ b/src/base/window_base.c
+@@ -230,7 +230,6 @@ image_manager_t* window_base_get_image_manager(widget_t* widget) {
+ ret_t window_base_get_prop(widget_t* widget, const char* name, value_t* v) {
+   window_base_t* window_base = WINDOW_BASE(widget);
+   return_value_if_fail(widget != NULL && name != NULL && v != NULL, RET_BAD_PARAMS);
+-
+   if (tk_str_eq(name, WIDGET_PROP_ANIM_HINT)) {
+     if (window_base->disable_anim) {
+       value_set_str(v, NULL);
+@@ -303,6 +302,12 @@ ret_t window_base_get_prop(widget_t* widget, const char* name, value_t* v) {
+   } else if (tk_str_eq(name, WIDGET_PROP_MOVE_FOCUS_RIGHT_KEY)) {
+     value_set_str(v, window_base->move_focus_right_key);
+     return RET_OK;
++  } else if (tk_str_eq(name, WIDGET_PROP_MOVE_FOCUS_PARENT_KEY)) {
++    value_set_str(v, window_base->move_focus_parent_key);
++    return RET_OK;
++  } else if (tk_str_eq(name, WIDGET_PROP_MOVE_FOCUS_CHILDREN_KEY)) {
++    value_set_str(v, window_base->move_focus_children_key);
++    return RET_OK;
+   } else if (tk_str_eq(name, WIDGET_PROP_SINGLE_INSTANCE)) {
+     value_set_bool(v, window_base->single_instance);
+     return RET_OK;
+@@ -370,7 +375,6 @@ static ret_t window_base_set_applet_name(widget_t* widget, const char* applet_na
+ ret_t window_base_set_prop(widget_t* widget, const char* name, const value_t* v) {
+   window_base_t* window_base = WINDOW_BASE(widget);
+   return_value_if_fail(widget != NULL && name != NULL && v != NULL, RET_BAD_PARAMS);
+-
+   if (tk_str_eq(name, WIDGET_PROP_ANIM_HINT)) {
+     window_base->open_anim_hint = tk_str_copy(window_base->open_anim_hint, value_str(v));
+     window_base->close_anim_hint = tk_str_copy(window_base->close_anim_hint, value_str(v));
+@@ -407,8 +411,13 @@ ret_t window_base_set_prop(widget_t* widget, const char* name, const value_t* v)
+     window_base->move_focus_left_key = tk_str_copy(window_base->move_focus_left_key, value_str(v));
+     return RET_OK;
+   } else if (tk_str_eq(name, WIDGET_PROP_MOVE_FOCUS_RIGHT_KEY)) {
+-    window_base->move_focus_right_key =
+-        tk_str_copy(window_base->move_focus_right_key, value_str(v));
++    window_base->move_focus_right_key = tk_str_copy(window_base->move_focus_right_key, value_str(v));
++    return RET_OK;
++  } else if (tk_str_eq(name, WIDGET_PROP_MOVE_FOCUS_PARENT_KEY)) {
++    window_base->move_focus_parent_key = tk_str_copy(window_base->move_focus_parent_key, value_str(v));
++    return RET_OK;
++  } else if (tk_str_eq(name, WIDGET_PROP_MOVE_FOCUS_CHILDREN_KEY)) {
++    window_base->move_focus_children_key = tk_str_copy(window_base->move_focus_children_key, value_str(v));
+     return RET_OK;
+   } else if (tk_str_eq(name, WIDGET_PROP_SINGLE_INSTANCE)) {
+     window_base->single_instance = value_bool(v);
+@@ -470,7 +479,9 @@ ret_t window_base_on_destroy(widget_t* widget) {
+   TKMEM_FREE(window_base->move_focus_down_key);
+   TKMEM_FREE(window_base->move_focus_left_key);
+   TKMEM_FREE(window_base->move_focus_right_key);
+-
++  TKMEM_FREE(window_base->move_focus_parent_key);
++  TKMEM_FREE(window_base->move_focus_children_key);
++  widget_tree_focus_manager_destroy(window_base->tree_focus_manager);
+   window_base_unload_theme_obj(widget);
+ 
+   return RET_OK;
+@@ -727,7 +738,7 @@ widget_t* window_base_create(widget_t* parent, const widget_vtable_t* vt, xy_t x
+   widget_t* widget = widget_create(NULL, vt, x, y, w, h);
+   window_base_t* win = WINDOW_BASE(widget);
+   keyboard_type_t keyboard_type = system_info()->keyboard_type;
+-
++  win->tree_focus_manager = widget_tree_focus_manager_create(win);
+   return_value_if_fail(win != NULL, NULL);
+ 
+   if (parent == NULL) {
+@@ -780,6 +791,8 @@ static const char* s_window_base_properties[] = {WIDGET_PROP_ANIM_HINT,
+                                                  WIDGET_PROP_MOVE_FOCUS_DOWN_KEY,
+                                                  WIDGET_PROP_MOVE_FOCUS_LEFT_KEY,
+                                                  WIDGET_PROP_MOVE_FOCUS_RIGHT_KEY,
++                                                 WIDGET_PROP_MOVE_FOCUS_PARENT_KEY,
++                                                 WIDGET_PROP_MOVE_FOCUS_CHILDREN_KEY,
+                                                  WIDGET_PROP_SINGLE_INSTANCE,
+                                                  WIDGET_PROP_STRONGLY_FOCUS,
+                                                  WIDGET_PROP_DESIGN_W,
+diff --git a/src/base/window_base.h b/src/base/window_base.h
+index 3cb81e696..82a221640 100644
+--- a/src/base/window_base.h
++++ b/src/base/window_base.h
+@@ -22,10 +22,11 @@
+ #ifndef TK_WINDOW_BASE_H
+ #define TK_WINDOW_BASE_H
+ 
++
+ #include "base/widget.h"
+ #include "base/widget_vtable.h"
+ #include "base/native_window.h"
+-
++#include "base/widget_tree_focus_manager.h"
+ BEGIN_C_DECLS
+ 
+ /**
+@@ -243,6 +244,25 @@ typedef struct _window_base_t {
+    */
+   char* move_focus_right_key;
+ 
++
++  /**
++   * @property {char*} move_focus_parent_key
++   * @annotation ["set_prop","get_prop","readable","persitent","design","scriptable"]
++   * 移动至父控件焦点的键值。
++   *
++   * 请参考[控件焦点](https://github.com/zlgopen/awtk/blob/master/docs/widget_focus.md)
++   */
++  char* move_focus_parent_key;
++
++  /**
++   * @property {char*} move_focus_children_key
++   * @annotation ["set_prop","get_prop","readable","persitent","design","scriptable"]
++   * 移动至子控件焦点的键值。
++   *
++   * 请参考[控件焦点](https://github.com/zlgopen/awtk/blob/master/docs/widget_focus.md)
++   */
++  char* move_focus_children_key;
++
+   /**
+    * @property {char*} applet_name
+    * @annotation ["set_prop","get_prop","readable","persitent","design","scriptable"]
+@@ -280,6 +300,7 @@ typedef struct _window_base_t {
+   assets_manager_t* assets_manager;
+   image_manager_t* image_manager;
+   locale_info_t* locale_info;
++  widget_tree_focus_manager_t *tree_focus_manager;
+ } window_base_t;
+ 
+ /**
+diff --git a/tree_focus.diff b/tree_focus.diff
+new file mode 100644
+index 000000000..cb355978f
+--- /dev/null
++++ b/tree_focus.diff
+@@ -0,0 +1,539 @@
++diff --git a/awtk_config.py b/awtk_config.py
++index 36c4d71cb..b26f3e2a1 100644
++--- a/awtk_config.py
+++++ b/awtk_config.py
++@@ -46,12 +46,12 @@ VGCANVAS = complie_helper.get_value('VGCANVAS', VGCANVAS)
++ 
++ if OS_NAME == 'Windows':
++     TK_ROOT = TK_ROOT.replace('\\', '\\\\')
++-# NANOVG_BACKEND = 'GL3'
+++NANOVG_BACKEND = 'GL3'
++ 
++ # NANOVG_BACKEND='GLES2'
++ # NANOVG_BACKEND='GLES3'
++ # NANOVG_BACKEND='AGG'
++-NANOVG_BACKEND='AGGE'
+++# NANOVG_BACKEND='AGGE'
++ # NANOVG_BACKEND='GL2'
++ NANOVG_BACKEND = complie_helper.get_value('NANOVG_BACKEND', NANOVG_BACKEND)
++ #NANOVG_BACKEND='BGFX'
++@@ -59,13 +59,13 @@ NANOVG_BACKEND = complie_helper.get_value('NANOVG_BACKEND', NANOVG_BACKEND)
++ FRAME_BUFFER_FORMAT = ''
++ if VGCANVAS == 'CAIRO':
++     LCD = 'SDL_FB'
++-    # FRAME_BUFFER_FORMAT = 'bgr565'
++-    FRAME_BUFFER_FORMAT='bgra8888'
+++    FRAME_BUFFER_FORMAT = 'bgr565'
+++    # FRAME_BUFFER_FORMAT='bgra8888'
++ else:
++     if NANOVG_BACKEND == 'AGGE' or NANOVG_BACKEND == 'AGG':
++         LCD = 'SDL_FB'
++-        # FRAME_BUFFER_FORMAT = 'bgr565'
++-        FRAME_BUFFER_FORMAT='bgra8888'
+++        FRAME_BUFFER_FORMAT = 'bgr565'
+++        # FRAME_BUFFER_FORMAT='bgra8888'
++     else:
++         LCD = 'SDL_GPU'
++ # LCD='SDL_FB_MONO'
++diff --git a/awtk_config_common.py b/awtk_config_common.py
++index 1bc825b92..32c79c9e7 100644
++--- a/awtk_config_common.py
+++++ b/awtk_config_common.py
++@@ -74,10 +74,10 @@ GTEST_ROOT = joinPath(TK_ROOT, '3rd/gtest/googletest')
++ TKC_STATIC_LIBS = ['debugger', 'fscript_ext', 'streams', 'romfs', 'conf_io', 'hal', 'xml', 'charset',
++                    'csv', 'ubjson', 'compressors', 'miniz', 'tkc_core', 'mbedtls']
++ 
++-# TOOLS_NAME = ''
+++TOOLS_NAME = ''
++ NANOVG_BACKEND = ''
++ NATIVE_WINDOW = ''
++-TOOLS_NAME = 'mingw'
+++#TOOLS_NAME = 'mingw'
++ TOOLS_NAME = complie_helper.get_value('TOOLS_NAME', TOOLS_NAME)
++ 
++ if OS_NAME == 'Windows':
++diff --git a/src/base/widget.c b/src/base/widget.c
++index 6077a8440..d7633b9cb 100644
++--- a/src/base/widget.c
+++++ b/src/base/widget.c
++@@ -49,14 +49,11 @@
++ #include "blend/image_g2d.h"
++ #include "base/style_const.h"
++ #include "base/widget_visible_in_scroll_view.inc"
++-#include "base/widget_tree_focus_manager.h"
++ 
++ ret_t widget_focus_up(widget_t* widget);
++ ret_t widget_focus_down(widget_t* widget);
++ ret_t widget_focus_left(widget_t* widget);
++ ret_t widget_focus_right(widget_t* widget);
++-ret_t widget_focus_parent(widget_t *widget);
++-ret_t widget_focus_children(widget_t *widget);
++ static ret_t widget_unref_async(widget_t* widget);
++ static ret_t widget_ensure_style_mutable(widget_t* widget);
++ static ret_t widget_dispatch_blur_event(widget_t* widget);
++@@ -2153,7 +2150,7 @@ ret_t widget_set_prop(widget_t* widget, const char* name, const value_t* v) {
++   e.name = name;
++   e.e = event_init(EVT_PROP_WILL_CHANGE, widget);
++   widget_dispatch(widget, (event_t*)&e);
++-  
+++
++   if (tk_str_eq(name, WIDGET_PROP_X)) {
++     widget_set_x(widget, (xy_t)value_int(v), TRUE);
++   } else if (tk_str_eq(name, WIDGET_PROP_Y)) {
++@@ -2764,19 +2761,10 @@ static bool_t widget_is_move_focus_right_key(widget_t* widget, key_event_t* e) {
++   return widget_match_key(widget, WIDGET_PROP_MOVE_FOCUS_RIGHT_KEY, e);
++ }
++ 
++-static bool_t widget_is_move_focus_parent_key(widget_t* widget, key_event_t* e) {
++-  return widget_match_key(widget, WIDGET_PROP_MOVE_FOCUS_PARENT_KEY, e);
++-}
++-
++-static bool_t widget_is_move_focus_children_key(widget_t* widget, key_event_t* e) {
++-  return widget_match_key(widget, WIDGET_PROP_MOVE_FOCUS_CHILDREN_KEY, e);
++-}
++-
++ bool_t widget_is_change_focus_key(widget_t* widget, key_event_t* e) {
++   return widget_is_move_focus_prev_key(widget, e) || widget_is_move_focus_next_key(widget, e) ||
++          widget_is_move_focus_up_key(widget, e) || widget_is_move_focus_down_key(widget, e) ||
++-         widget_is_move_focus_left_key(widget, e) || widget_is_move_focus_right_key(widget, e) ||
++-         widget_is_move_focus_parent_key(widget, e) || widget_is_move_focus_children_key(widget, e);
+++         widget_is_move_focus_left_key(widget, e) || widget_is_move_focus_right_key(widget, e);
++ }
++ 
++ static ret_t widget_on_keydown_general(widget_t* widget, key_event_t* e) {
++@@ -2821,16 +2809,6 @@ static ret_t widget_on_keydown_general(widget_t* widget, key_event_t* e) {
++         ret = RET_STOP;
++         widget_focus_right(widget);
++       }
++-    } else if (widget_is_move_focus_parent_key(widget, e)) {
++-      if(widget_is_focusable(widget)) {
++-        ret = RET_STOP;
++-        widget_focus_parent(widget);
++-      }
++-    } else if (widget_is_move_focus_children_key(widget, e)) {
++-      if(widget_is_focusable(widget)) {
++-        ret = RET_STOP;
++-        widget_focus_children(widget);
++-      }
++     }
++   }
++ 
++@@ -4615,17 +4593,6 @@ ret_t widget_focus_right(widget_t* widget) {
++   }
++ }
++ 
++-
++-ret_t widget_focus_parent(widget_t* widget) {
++-  widget_t *win = widget_get_window(widget);
++-  return widget_tree_focus_move_parent(WINDOW_BASE(win)->tree_focus_manager, widget);
++-}
++-
++-ret_t widget_focus_children(widget_t* widget) {
++-  widget_t *win = widget_get_window(widget);
++-  return widget_tree_focus_move_children(WINDOW_BASE(win)->tree_focus_manager, widget);
++-}
++-
++ bool_t widget_is_window(widget_t* widget) {
++   return_value_if_fail(widget != NULL && widget->vt != NULL, FALSE);
++ 
++diff --git a/src/base/widget_consts.h b/src/base/widget_consts.h
++index e4242627c..023ac56ca 100644
++--- a/src/base/widget_consts.h
+++++ b/src/base/widget_consts.h
++@@ -1045,20 +1045,6 @@ BEGIN_C_DECLS
++  */
++ #define WIDGET_PROP_MOVE_FOCUS_RIGHT_KEY "move_focus_right_key"
++ 
++-
++-/**
++- * @const WIDGET_PROP_MOVE_FOCUS_PARENT_KEY
++- * 将焦点移到父控件的键值。
++- */ 
++-#define WIDGET_PROP_MOVE_FOCUS_PARENT_KEY "move_focus_parent_key"
++-
++-/**
++- * @const WIDGET_PROP_MOVE_FOCUS_CHILDREN_KEY 
++- * 将焦点移到子控件的键值
++- */
++-#define WIDGET_PROP_MOVE_FOCUS_CHILDREN_KEY "move_focus_children_key"
++-
++-
++ /**
++  * @const WIDGET_PROP_ROWS
++  * 行数。
++diff --git a/src/base/widget_tree_focus_manager.c b/src/base/widget_tree_focus_manager.c
++deleted file mode 100644
++index cdc3b1395..000000000
++--- a/src/base/widget_tree_focus_manager.c
+++++ /dev/null
++@@ -1,136 +0,0 @@
++-#include "widget_tree_focus_manager.h"
++-#include "tkc/mem.h"
++-#include <stdbool.h>
++-
++-
++-static ret_t widget_print_all_focusable_widgets(darray_t *all_focusable)
++-{
++-	return_value_if_fail(all_focusable, RET_FAIL);
++-	for (int i = 0; i < all_focusable->size; i++)
++-	{
++-		if (all_focusable->elms[i])
++-		{
++-			printf("widget_print_all_focusable_widgets>find widget name: %s at %#x\r\n", WIDGET(all_focusable->elms[i])->name, WIDGET(all_focusable->elms[i]));
++-		}
++-	}
++-	return RET_OK;
++-}
++-
++-/**
++- * @brief 查找以widget为根节点下的所有可聚焦子控件，记录在all_focusable数组上 
++- * 
++- * @param [in] widget 
++- * @param [out] all_focusable 
++- * @return ret_t 
++- */
++-static ret_t widget_get_all_focusable_widgets(widget_t *widget, darray_t *all_focusable)
++-{
++-	widget_foreach(widget, widget_on_visit_focusable, all_focusable);
++-	return_value_if_fail(widget != NULL, RET_FAIL);
++-	return_value_if_fail(all_focusable != NULL && all_focusable->size > 0, RET_FAIL);
++-	return RET_OK;
++-}
++-
++-static ret_t widget_set_all_focusable(darray_t *all_focusable, bool flag)
++-{
++-	return_value_if_fail(all_focusable, RET_FAIL);
++-	for (int i = 0; i < all_focusable->size; i++)
++-	{
++-		if (all_focusable->elms[i])
++-		{
++-			widget_set_focusable(WIDGET(all_focusable->elms[i]), flag);
++-		}
++-	}
++-	return RET_OK;
++-}
++-
++-static ret_t widget_set_all_focused(darray_t *all_focusable, bool flag)
++-{
++-	return_value_if_fail(all_focusable, RET_FAIL);
++-	for (int i = 0; i < all_focusable->size; i++)
++-	{
++-		if (all_focusable->elms[i])
++-		{
++-			widget_set_prop_bool(WIDGET(all_focusable->elms[i]), WIDGET_PROP_FOCUSED, flag);
++-		}
++-	}
++-	return RET_OK;
++-}
++-
++-widget_tree_focus_manager_t* widget_tree_focus_manager_create(widget_t *win){
++-    return_value_if_fail(win != NULL, NULL);
++-    widget_tree_focus_manager_t *manager = TKMEM_ZALLOC(widget_tree_focus_manager_t);
++-    manager->win = win;
++-    manager->g_focus_widget_list_stack = darray_create(10, NULL, NULL);
++-    manager->g_focus_widget_stack = darray_create(10, NULL, NULL);
++-    return manager;
++-}
++-
++-ret_t widget_tree_focus_move_parent(widget_tree_focus_manager_t* manager, widget_t *focused_widget){
++-    return_value_if_fail(manager != NULL, RET_BAD_PARAMS);
++-    darray_t *g_focus_widget_list_stack = manager->g_focus_widget_list_stack;
++-    darray_t *g_focus_widget_stack = manager->g_focus_widget_stack;
++-    widget_t *win = manager->win;
++-    ret_t ret = RET_OK;
++-    if (g_focus_widget_list_stack->size == 0)
++-    {
++-        printf("no focusable parent widget\r\n");
++-        return RET_STOP;
++-    }
++-    /* 恢复父层控件的可聚焦性 */
++-    darray_t *parent_focusable_widget_list = darray_pop(g_focus_widget_list_stack);
++-    focused_widget = darray_pop(g_focus_widget_stack);
++-    ret = widget_set_all_focusable(parent_focusable_widget_list, TRUE);
++-    ret = widget_set_all_focused(parent_focusable_widget_list, FALSE);
++-    ret = widget_set_focused(focused_widget, TRUE);
++-
++-    ret = darray_destroy(parent_focusable_widget_list);
++-    return ret;
++-}
++-
++-ret_t widget_tree_focus_move_children(widget_tree_focus_manager_t* manager, widget_t *focused_widget){
++-    return_value_if_fail(manager != NULL, RET_BAD_PARAMS);
++-    darray_t *g_focus_widget_list_stack = manager->g_focus_widget_list_stack;
++-    darray_t *g_focus_widget_stack = manager->g_focus_widget_stack;
++-    widget_t *win = manager->win;
++-    ret_t ret = RET_OK;
++-
++-    /* parent_focusable_widget_list的生命周期：在widget_tree_focus_move_children创建， 赋值入栈，在widget_tree_focus_move_parent出栈，销毁 */
++-    darray_t *parent_focusable_widget_list = darray_create(10, NULL, NULL);
++-    widget_get_all_focusable_widgets(win, parent_focusable_widget_list);
++-    
++-    /* child_focusable_widget_list的生命周期：比较简单，本函数内创建赋值，完成查找所有可聚焦子控件的任务后销毁 */
++-    darray_t *child_focusable_widget_list = darray_create(10, NULL, NULL);
++-    widget_get_all_focusable_widgets(focused_widget, child_focusable_widget_list);
++-    darray_remove(child_focusable_widget_list, focused_widget);
++-
++-    if (child_focusable_widget_list->size > 0)
++-    {
++-        /* 屏蔽当前控件以上所有父层子控件，并聚焦当前控件的第一个子控件 */
++-        widget_set_all_focusable(parent_focusable_widget_list, FALSE);
++-        widget_set_all_focusable(child_focusable_widget_list, TRUE);
++-        widget_set_all_focused(parent_focusable_widget_list, FALSE);
++-        widget_set_focused(WIDGET(child_focusable_widget_list->elms[0]), TRUE);
++-        
++-        /* 保存这些取消聚焦的控件列表和前一个聚焦控件，以便在widget_tree_focus_move_parent中出栈恢复 */
++-        darray_push(g_focus_widget_list_stack, parent_focusable_widget_list);
++-        darray_push(g_focus_widget_stack, focused_widget);
++-    }
++-    else
++-    {
++-        printf("no focusable child widget\r\n");
++-    }
++-    ret = darray_destroy(child_focusable_widget_list);
++-    return ret;
++-}
++-
++-ret_t widget_tree_focus_manager_destroy(widget_tree_focus_manager_t *manager)
++-{
++-    if(manager == NULL){
++-        return RET_OK;
++-    }
++-    darray_destroy(manager->g_focus_widget_stack);
++-    darray_destroy(manager->g_focus_widget_list_stack);
++-    TKMEM_FREE(manager);
++-    return RET_OK;
++-}
++\ No newline at end of file
++diff --git a/src/base/widget_tree_focus_manager.h b/src/base/widget_tree_focus_manager.h
++deleted file mode 100644
++index 3cd3bcf50..000000000
++--- a/src/base/widget_tree_focus_manager.h
+++++ /dev/null
++@@ -1,37 +0,0 @@
++-#ifndef WIDGET_TREE_FOCUS_MANAGER_H
++-#define WIDGET_TREE_FOCUS_MANAGER_H
++-#include "tkc/darray.h"
++-#include "base/widget.h"
++-BEGIN_C_DECLS
++-/**
++- * @brief 当窗口基于控件树的"层级逻辑"进行焦点切换时，采用此类进行管理
++- *  该类非单例，每个窗口对象都有一个这样的widget_tree_focus_manager_t对象
++- * （如果切换到子控件，focusable控件将切换为子控件内部的所有的focusable控件，并屏蔽外部父层及以上的focusable控件）
++- * 在xml上的使用方法例：
++- * <window name="focus_test_window" style:normal:bg_color="#1A2F4A" move_focus_up_key="up" move_focus_down_key="down" move_focus_left_key="left" move_focus_right_key="right"  move_focus_children_key="RETURN" move_focus_parent_key="ESCAPE">
++- ...
++- </window>
++- * 
++- */
++-typedef struct {
++-    widget_t *win;
++-    /**
++-     * @brief 进入子控件层时，将上层开始的所有focusable控件list压栈到此
++-     * 
++-     */
++-    darray_t *g_focus_widget_list_stack;
++-    /**
++-     * @brief 进入子控件层时，将前一个聚焦的控件的压栈至此
++-     * 
++-     */
++-    darray_t *g_focus_widget_stack;
++-} widget_tree_focus_manager_t;
++-
++-widget_tree_focus_manager_t* widget_tree_focus_manager_create(widget_t *win);
++-ret_t widget_tree_focus_move_parent(widget_tree_focus_manager_t* manager, widget_t *focused_widget);
++-ret_t widget_tree_focus_move_children(widget_tree_focus_manager_t* manager, widget_t *focused_widget);
++-ret_t widget_tree_focus_manager_destroy(widget_tree_focus_manager_t *manager);
++-
++-
++-END_C_DECLS
++-#endif  /* WIDGET_TREE_FOCUS_MANAGER_H */
++\ No newline at end of file
++diff --git a/src/base/window_base.c b/src/base/window_base.c
++index 6015b4f47..e7dcad28e 100644
++--- a/src/base/window_base.c
+++++ b/src/base/window_base.c
++@@ -230,6 +230,7 @@ image_manager_t* window_base_get_image_manager(widget_t* widget) {
++ ret_t window_base_get_prop(widget_t* widget, const char* name, value_t* v) {
++   window_base_t* window_base = WINDOW_BASE(widget);
++   return_value_if_fail(widget != NULL && name != NULL && v != NULL, RET_BAD_PARAMS);
+++
++   if (tk_str_eq(name, WIDGET_PROP_ANIM_HINT)) {
++     if (window_base->disable_anim) {
++       value_set_str(v, NULL);
++@@ -302,12 +303,6 @@ ret_t window_base_get_prop(widget_t* widget, const char* name, value_t* v) {
++   } else if (tk_str_eq(name, WIDGET_PROP_MOVE_FOCUS_RIGHT_KEY)) {
++     value_set_str(v, window_base->move_focus_right_key);
++     return RET_OK;
++-  } else if (tk_str_eq(name, WIDGET_PROP_MOVE_FOCUS_PARENT_KEY)) {
++-    value_set_str(v, window_base->move_focus_parent_key);
++-    return RET_OK;
++-  } else if (tk_str_eq(name, WIDGET_PROP_MOVE_FOCUS_CHILDREN_KEY)) {
++-    value_set_str(v, window_base->move_focus_children_key);
++-    return RET_OK;
++   } else if (tk_str_eq(name, WIDGET_PROP_SINGLE_INSTANCE)) {
++     value_set_bool(v, window_base->single_instance);
++     return RET_OK;
++@@ -375,6 +370,7 @@ static ret_t window_base_set_applet_name(widget_t* widget, const char* applet_na
++ ret_t window_base_set_prop(widget_t* widget, const char* name, const value_t* v) {
++   window_base_t* window_base = WINDOW_BASE(widget);
++   return_value_if_fail(widget != NULL && name != NULL && v != NULL, RET_BAD_PARAMS);
+++
++   if (tk_str_eq(name, WIDGET_PROP_ANIM_HINT)) {
++     window_base->open_anim_hint = tk_str_copy(window_base->open_anim_hint, value_str(v));
++     window_base->close_anim_hint = tk_str_copy(window_base->close_anim_hint, value_str(v));
++@@ -411,13 +407,8 @@ ret_t window_base_set_prop(widget_t* widget, const char* name, const value_t* v)
++     window_base->move_focus_left_key = tk_str_copy(window_base->move_focus_left_key, value_str(v));
++     return RET_OK;
++   } else if (tk_str_eq(name, WIDGET_PROP_MOVE_FOCUS_RIGHT_KEY)) {
++-    window_base->move_focus_right_key = tk_str_copy(window_base->move_focus_right_key, value_str(v));
++-    return RET_OK;
++-  } else if (tk_str_eq(name, WIDGET_PROP_MOVE_FOCUS_PARENT_KEY)) {
++-    window_base->move_focus_parent_key = tk_str_copy(window_base->move_focus_parent_key, value_str(v));
++-    return RET_OK;
++-  } else if (tk_str_eq(name, WIDGET_PROP_MOVE_FOCUS_CHILDREN_KEY)) {
++-    window_base->move_focus_children_key = tk_str_copy(window_base->move_focus_children_key, value_str(v));
+++    window_base->move_focus_right_key =
+++        tk_str_copy(window_base->move_focus_right_key, value_str(v));
++     return RET_OK;
++   } else if (tk_str_eq(name, WIDGET_PROP_SINGLE_INSTANCE)) {
++     window_base->single_instance = value_bool(v);
++@@ -479,9 +470,7 @@ ret_t window_base_on_destroy(widget_t* widget) {
++   TKMEM_FREE(window_base->move_focus_down_key);
++   TKMEM_FREE(window_base->move_focus_left_key);
++   TKMEM_FREE(window_base->move_focus_right_key);
++-  TKMEM_FREE(window_base->move_focus_parent_key);
++-  TKMEM_FREE(window_base->move_focus_children_key);
++-  widget_tree_focus_manager_destroy(window_base->tree_focus_manager);
+++
++   window_base_unload_theme_obj(widget);
++ 
++   return RET_OK;
++@@ -738,7 +727,7 @@ widget_t* window_base_create(widget_t* parent, const widget_vtable_t* vt, xy_t x
++   widget_t* widget = widget_create(NULL, vt, x, y, w, h);
++   window_base_t* win = WINDOW_BASE(widget);
++   keyboard_type_t keyboard_type = system_info()->keyboard_type;
++-  win->tree_focus_manager = widget_tree_focus_manager_create(win);
+++
++   return_value_if_fail(win != NULL, NULL);
++ 
++   if (parent == NULL) {
++@@ -791,8 +780,6 @@ static const char* s_window_base_properties[] = {WIDGET_PROP_ANIM_HINT,
++                                                  WIDGET_PROP_MOVE_FOCUS_DOWN_KEY,
++                                                  WIDGET_PROP_MOVE_FOCUS_LEFT_KEY,
++                                                  WIDGET_PROP_MOVE_FOCUS_RIGHT_KEY,
++-                                                 WIDGET_PROP_MOVE_FOCUS_PARENT_KEY,
++-                                                 WIDGET_PROP_MOVE_FOCUS_CHILDREN_KEY,
++                                                  WIDGET_PROP_SINGLE_INSTANCE,
++                                                  WIDGET_PROP_STRONGLY_FOCUS,
++                                                  WIDGET_PROP_DESIGN_W,
++diff --git a/src/base/window_base.h b/src/base/window_base.h
++index 82a221640..3cb81e696 100644
++--- a/src/base/window_base.h
+++++ b/src/base/window_base.h
++@@ -22,11 +22,10 @@
++ #ifndef TK_WINDOW_BASE_H
++ #define TK_WINDOW_BASE_H
++ 
++-
++ #include "base/widget.h"
++ #include "base/widget_vtable.h"
++ #include "base/native_window.h"
++-#include "base/widget_tree_focus_manager.h"
+++
++ BEGIN_C_DECLS
++ 
++ /**
++@@ -244,25 +243,6 @@ typedef struct _window_base_t {
++    */
++   char* move_focus_right_key;
++ 
++-
++-  /**
++-   * @property {char*} move_focus_parent_key
++-   * @annotation ["set_prop","get_prop","readable","persitent","design","scriptable"]
++-   * 移动至父控件焦点的键值。
++-   *
++-   * 请参考[控件焦点](https://github.com/zlgopen/awtk/blob/master/docs/widget_focus.md)
++-   */
++-  char* move_focus_parent_key;
++-
++-  /**
++-   * @property {char*} move_focus_children_key
++-   * @annotation ["set_prop","get_prop","readable","persitent","design","scriptable"]
++-   * 移动至子控件焦点的键值。
++-   *
++-   * 请参考[控件焦点](https://github.com/zlgopen/awtk/blob/master/docs/widget_focus.md)
++-   */
++-  char* move_focus_children_key;
++-
++   /**
++    * @property {char*} applet_name
++    * @annotation ["set_prop","get_prop","readable","persitent","design","scriptable"]
++@@ -300,7 +280,6 @@ typedef struct _window_base_t {
++   assets_manager_t* assets_manager;
++   image_manager_t* image_manager;
++   locale_info_t* locale_info;
++-  widget_tree_focus_manager_t *tree_focus_manager;
++ } window_base_t;
++ 
++ /**
++diff --git a/tree_focus.patch b/tree_focus.patch
++deleted file mode 100644
++index af570f498..000000000
++--- a/tree_focus.patch
+++++ /dev/null
++@@ -1,54 +0,0 @@
++-diff --git a/awtk_config.py b/awtk_config.py
++-index b26f3e2a1..36c4d71cb 100644
++---- a/awtk_config.py
++-+++ b/awtk_config.py
++-@@ -46,12 +46,12 @@ VGCANVAS = complie_helper.get_value('VGCANVAS', VGCANVAS)
++- 
++- if OS_NAME == 'Windows':
++-     TK_ROOT = TK_ROOT.replace('\\', '\\\\')
++--NANOVG_BACKEND = 'GL3'
++-+# NANOVG_BACKEND = 'GL3'
++- 
++- # NANOVG_BACKEND='GLES2'
++- # NANOVG_BACKEND='GLES3'
++- # NANOVG_BACKEND='AGG'
++--# NANOVG_BACKEND='AGGE'
++-+NANOVG_BACKEND='AGGE'
++- # NANOVG_BACKEND='GL2'
++- NANOVG_BACKEND = complie_helper.get_value('NANOVG_BACKEND', NANOVG_BACKEND)
++- #NANOVG_BACKEND='BGFX'
++-@@ -59,13 +59,13 @@ NANOVG_BACKEND = complie_helper.get_value('NANOVG_BACKEND', NANOVG_BACKEND)
++- FRAME_BUFFER_FORMAT = ''
++- if VGCANVAS == 'CAIRO':
++-     LCD = 'SDL_FB'
++--    FRAME_BUFFER_FORMAT = 'bgr565'
++--    # FRAME_BUFFER_FORMAT='bgra8888'
++-+    # FRAME_BUFFER_FORMAT = 'bgr565'
++-+    FRAME_BUFFER_FORMAT='bgra8888'
++- else:
++-     if NANOVG_BACKEND == 'AGGE' or NANOVG_BACKEND == 'AGG':
++-         LCD = 'SDL_FB'
++--        FRAME_BUFFER_FORMAT = 'bgr565'
++--        # FRAME_BUFFER_FORMAT='bgra8888'
++-+        # FRAME_BUFFER_FORMAT = 'bgr565'
++-+        FRAME_BUFFER_FORMAT='bgra8888'
++-     else:
++-         LCD = 'SDL_GPU'
++- # LCD='SDL_FB_MONO'
++-diff --git a/awtk_config_common.py b/awtk_config_common.py
++-index 32c79c9e7..1bc825b92 100644
++---- a/awtk_config_common.py
++-+++ b/awtk_config_common.py
++-@@ -74,10 +74,10 @@ GTEST_ROOT = joinPath(TK_ROOT, '3rd/gtest/googletest')
++- TKC_STATIC_LIBS = ['debugger', 'fscript_ext', 'streams', 'romfs', 'conf_io', 'hal', 'xml', 'charset',
++-                    'csv', 'ubjson', 'compressors', 'miniz', 'tkc_core', 'mbedtls']
++- 
++--TOOLS_NAME = ''
++-+# TOOLS_NAME = ''
++- NANOVG_BACKEND = ''
++- NATIVE_WINDOW = ''
++--#TOOLS_NAME = 'mingw'
++-+TOOLS_NAME = 'mingw'
++- TOOLS_NAME = complie_helper.get_value('TOOLS_NAME', TOOLS_NAME)
++- 
++- if OS_NAME == 'Windows':

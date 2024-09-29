@@ -49,11 +49,14 @@
 #include "blend/image_g2d.h"
 #include "base/style_const.h"
 #include "base/widget_visible_in_scroll_view.inc"
+#include "base/widget_tree_focus_manager.h"
 
 ret_t widget_focus_up(widget_t* widget);
 ret_t widget_focus_down(widget_t* widget);
 ret_t widget_focus_left(widget_t* widget);
 ret_t widget_focus_right(widget_t* widget);
+ret_t widget_focus_parent(widget_t *widget);
+ret_t widget_focus_children(widget_t *widget);
 static ret_t widget_unref_async(widget_t* widget);
 static ret_t widget_ensure_style_mutable(widget_t* widget);
 static ret_t widget_dispatch_blur_event(widget_t* widget);
@@ -2150,7 +2153,7 @@ ret_t widget_set_prop(widget_t* widget, const char* name, const value_t* v) {
   e.name = name;
   e.e = event_init(EVT_PROP_WILL_CHANGE, widget);
   widget_dispatch(widget, (event_t*)&e);
-
+  
   if (tk_str_eq(name, WIDGET_PROP_X)) {
     widget_set_x(widget, (xy_t)value_int(v), TRUE);
   } else if (tk_str_eq(name, WIDGET_PROP_Y)) {
@@ -2761,10 +2764,19 @@ static bool_t widget_is_move_focus_right_key(widget_t* widget, key_event_t* e) {
   return widget_match_key(widget, WIDGET_PROP_MOVE_FOCUS_RIGHT_KEY, e);
 }
 
+static bool_t widget_is_move_focus_parent_key(widget_t* widget, key_event_t* e) {
+  return widget_match_key(widget, WIDGET_PROP_MOVE_FOCUS_PARENT_KEY, e);
+}
+
+static bool_t widget_is_move_focus_children_key(widget_t* widget, key_event_t* e) {
+  return widget_match_key(widget, WIDGET_PROP_MOVE_FOCUS_CHILDREN_KEY, e);
+}
+
 bool_t widget_is_change_focus_key(widget_t* widget, key_event_t* e) {
   return widget_is_move_focus_prev_key(widget, e) || widget_is_move_focus_next_key(widget, e) ||
          widget_is_move_focus_up_key(widget, e) || widget_is_move_focus_down_key(widget, e) ||
-         widget_is_move_focus_left_key(widget, e) || widget_is_move_focus_right_key(widget, e);
+         widget_is_move_focus_left_key(widget, e) || widget_is_move_focus_right_key(widget, e) ||
+         widget_is_move_focus_parent_key(widget, e) || widget_is_move_focus_children_key(widget, e);
 }
 
 static ret_t widget_on_keydown_general(widget_t* widget, key_event_t* e) {
@@ -2808,6 +2820,16 @@ static ret_t widget_on_keydown_general(widget_t* widget, key_event_t* e) {
       if (widget_is_focusable(widget)) {
         ret = RET_STOP;
         widget_focus_right(widget);
+      }
+    } else if (widget_is_move_focus_parent_key(widget, e)) {
+      if(widget_is_focusable(widget)) {
+        ret = RET_STOP;
+        widget_focus_parent(widget);
+      }
+    } else if (widget_is_move_focus_children_key(widget, e)) {
+      if(widget_is_focusable(widget)) {
+        ret = RET_STOP;
+        widget_focus_children(widget);
       }
     }
   }
@@ -4591,6 +4613,17 @@ ret_t widget_focus_right(widget_t* widget) {
   } else {
     return widget_focus_down(widget);
   }
+}
+
+
+ret_t widget_focus_parent(widget_t* widget) {
+  widget_t *win = widget_get_window(widget);
+  return widget_tree_focus_move_parent(WINDOW_BASE(win)->tree_focus_manager, widget);
+}
+
+ret_t widget_focus_children(widget_t* widget) {
+  widget_t *win = widget_get_window(widget);
+  return widget_tree_focus_move_children(WINDOW_BASE(win)->tree_focus_manager, widget);
 }
 
 bool_t widget_is_window(widget_t* widget) {

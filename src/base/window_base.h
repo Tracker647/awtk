@@ -22,10 +22,11 @@
 #ifndef TK_WINDOW_BASE_H
 #define TK_WINDOW_BASE_H
 
+
 #include "base/widget.h"
 #include "base/widget_vtable.h"
 #include "base/native_window.h"
-
+#include "base/widget_tree_focus_manager.h"
 BEGIN_C_DECLS
 
 /**
@@ -243,6 +244,25 @@ typedef struct _window_base_t {
    */
   char* move_focus_right_key;
 
+
+  /**
+   * @property {char*} move_focus_parent_key
+   * @annotation ["set_prop","get_prop","readable","persitent","design","scriptable"]
+   * 移动至父控件焦点的键值。
+   *
+   * 请参考[控件焦点](https://github.com/zlgopen/awtk/blob/master/docs/widget_focus.md)
+   */
+  char* move_focus_parent_key;
+
+  /**
+   * @property {char*} move_focus_children_key
+   * @annotation ["set_prop","get_prop","readable","persitent","design","scriptable"]
+   * 移动至子控件焦点的键值。
+   *
+   * 请参考[控件焦点](https://github.com/zlgopen/awtk/blob/master/docs/widget_focus.md)
+   */
+  char* move_focus_children_key;
+
   /**
    * @property {char*} applet_name
    * @annotation ["set_prop","get_prop","readable","persitent","design","scriptable"]
@@ -280,6 +300,7 @@ typedef struct _window_base_t {
   assets_manager_t* assets_manager;
   image_manager_t* image_manager;
   locale_info_t* locale_info;
+  widget_tree_focus_manager_t *tree_focus_manager;
 } window_base_t;
 
 /**

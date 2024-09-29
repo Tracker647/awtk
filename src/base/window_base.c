@@ -230,7 +230,6 @@ image_manager_t* window_base_get_image_manager(widget_t* widget) {
 ret_t window_base_get_prop(widget_t* widget, const char* name, value_t* v) {
   window_base_t* window_base = WINDOW_BASE(widget);
   return_value_if_fail(widget != NULL && name != NULL && v != NULL, RET_BAD_PARAMS);
-
   if (tk_str_eq(name, WIDGET_PROP_ANIM_HINT)) {
     if (window_base->disable_anim) {
       value_set_str(v, NULL);
@@ -303,6 +302,12 @@ ret_t window_base_get_prop(widget_t* widget, const char* name, value_t* v) {
   } else if (tk_str_eq(name, WIDGET_PROP_MOVE_FOCUS_RIGHT_KEY)) {
     value_set_str(v, window_base->move_focus_right_key);
     return RET_OK;
+  } else if (tk_str_eq(name, WIDGET_PROP_MOVE_FOCUS_PARENT_KEY)) {
+    value_set_str(v, window_base->move_focus_parent_key);
+    return RET_OK;
+  } else if (tk_str_eq(name, WIDGET_PROP_MOVE_FOCUS_CHILDREN_KEY)) {
+    value_set_str(v, window_base->move_focus_children_key);
+    return RET_OK;
   } else if (tk_str_eq(name, WIDGET_PROP_SINGLE_INSTANCE)) {
     value_set_bool(v, window_base->single_instance);
     return RET_OK;
@@ -370,7 +375,6 @@ static ret_t window_base_set_applet_name(widget_t* widget, const char* applet_na
 ret_t window_base_set_prop(widget_t* widget, const char* name, const value_t* v) {
   window_base_t* window_base = WINDOW_BASE(widget);
   return_value_if_fail(widget != NULL && name != NULL && v != NULL, RET_BAD_PARAMS);
-
   if (tk_str_eq(name, WIDGET_PROP_ANIM_HINT)) {
     window_base->open_anim_hint = tk_str_copy(window_base->open_anim_hint, value_str(v));
     window_base->close_anim_hint = tk_str_copy(window_base->close_anim_hint, value_str(v));
@@ -407,8 +411,13 @@ ret_t window_base_set_prop(widget_t* widget, const char* name, const value_t* v)
     window_base->move_focus_left_key = tk_str_copy(window_base->move_focus_left_key, value_str(v));
     return RET_OK;
   } else if (tk_str_eq(name, WIDGET_PROP_MOVE_FOCUS_RIGHT_KEY)) {
-    window_base->move_focus_right_key =
-        tk_str_copy(window_base->move_focus_right_key, value_str(v));
+    window_base->move_focus_right_key = tk_str_copy(window_base->move_focus_right_key, value_str(v));
+    return RET_OK;
+  } else if (tk_str_eq(name, WIDGET_PROP_MOVE_FOCUS_PARENT_KEY)) {
+    window_base->move_focus_parent_key = tk_str_copy(window_base->move_focus_parent_key, value_str(v));
+    return RET_OK;
+  } else if (tk_str_eq(name, WIDGET_PROP_MOVE_FOCUS_CHILDREN_KEY)) {
+    window_base->move_focus_children_key = tk_str_copy(window_base->move_focus_children_key, value_str(v));
     return RET_OK;
   } else if (tk_str_eq(name, WIDGET_PROP_SINGLE_INSTANCE)) {
     window_base->single_instance = value_bool(v);
@@ -470,7 +479,9 @@ ret_t window_base_on_destroy(widget_t* widget) {
   TKMEM_FREE(window_base->move_focus_down_key);
   TKMEM_FREE(window_base->move_focus_left_key);
   TKMEM_FREE(window_base->move_focus_right_key);
-
+  TKMEM_FREE(window_base->move_focus_parent_key);
+  TKMEM_FREE(window_base->move_focus_children_key);
+  widget_tree_focus_manager_destroy(window_base->tree_focus_manager);
   window_base_unload_theme_obj(widget);
 
   return RET_OK;
@@ -727,7 +738,7 @@ widget_t* window_base_create(widget_t* parent, const widget_vtable_t* vt, xy_t x
   widget_t* widget = widget_create(NULL, vt, x, y, w, h);
   window_base_t* win = WINDOW_BASE(widget);
   keyboard_type_t keyboard_type = system_info()->keyboard_type;
-
+  win->tree_focus_manager = widget_tree_focus_manager_create(win);
   return_value_if_fail(win != NULL, NULL);
 
   if (parent == NULL) {
@@ -780,6 +791,8 @@ static const char* s_window_base_properties[] = {WIDGET_PROP_ANIM_HINT,
                                                  WIDGET_PROP_MOVE_FOCUS_DOWN_KEY,
                                                  WIDGET_PROP_MOVE_FOCUS_LEFT_KEY,
                                                  WIDGET_PROP_MOVE_FOCUS_RIGHT_KEY,
+                                                 WIDGET_PROP_MOVE_FOCUS_PARENT_KEY,
+                                                 WIDGET_PROP_MOVE_FOCUS_CHILDREN_KEY,
                                                  WIDGET_PROP_SINGLE_INSTANCE,
                                                  WIDGET_PROP_STRONGLY_FOCUS,
                                                  WIDGET_PROP_DESIGN_W,

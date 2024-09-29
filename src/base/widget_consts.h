@@ -1045,6 +1045,20 @@ BEGIN_C_DECLS
  */
 #define WIDGET_PROP_MOVE_FOCUS_RIGHT_KEY "move_focus_right_key"
 
+
+/**
+ * @const WIDGET_PROP_MOVE_FOCUS_PARENT_KEY
+ * 将焦点移到父控件的键值。
+ */ 
+#define WIDGET_PROP_MOVE_FOCUS_PARENT_KEY "move_focus_parent_key"
+
+/**
+ * @const WIDGET_PROP_MOVE_FOCUS_CHILDREN_KEY 
+ * 将焦点移到子控件的键值
+ */
+#define WIDGET_PROP_MOVE_FOCUS_CHILDREN_KEY "move_focus_children_key"
+
+
 /**
  * @const WIDGET_PROP_ROWS
  * 行数。
