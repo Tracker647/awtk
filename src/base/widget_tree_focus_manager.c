@@ -1,4 +1,5 @@
 #include "widget_tree_focus_manager.h"
+#include "base/window_base.h"
 #include "tkc/mem.h"
 #include <stdbool.h>
 
@@ -10,7 +11,7 @@ static ret_t widget_print_all_focusable_widgets(darray_t *all_focusable)
 	{
 		if (all_focusable->elms[i])
 		{
-			printf("widget_print_all_focusable_widgets>find widget name: %s at %#x\r\n", WIDGET(all_focusable->elms[i])->name, WIDGET(all_focusable->elms[i]));
+			printf("widget_print_all_focusable_widgets>find widget name: %s at %p\r\n", WIDGET(all_focusable->elms[i])->name, WIDGET(all_focusable->elms[i]));
 		}
 	}
 	return RET_OK;
@@ -57,10 +58,66 @@ static ret_t widget_set_all_focused(darray_t *all_focusable, bool flag)
 	return RET_OK;
 }
 
+static ret_t on_no_focusable_children_default(void *ctx, event_t *e)
+{
+    printf("no focusable child widget\r\n");
+    return RET_OK;
+}
+
+static ret_t on_no_focusable_parent_default(void *ctx, event_t *e)
+{
+    printf("no focusable parent widget\r\n");
+    return RET_OK;
+}
+
+ret_t widget_tree_focus_set_cb(widget_t *win, enWidgetTreeFocusEvent treefocusEvent, widget_tree_focus_cb_t cb, void *ctx, event_t *e)
+{   	
+	widget_tree_focus_manager_t *manager = widget_tree_focus_manager_get_from_window(win);
+    return_value_if_fail(manager != NULL, RET_BAD_PARAMS);
+    switch(treefocusEvent){
+        case kNoChildrenFocusable:
+            manager->on_no_children_focusable.cb = cb;
+            manager->on_no_children_focusable.ctx = ctx;
+            manager->on_no_children_focusable.e = e;
+            break;
+        case kNoParentsFocusable:
+            manager->on_no_parents_focusable.cb = cb;
+            manager->on_no_parents_focusable.ctx = ctx;
+            manager->on_no_parents_focusable.e = e;
+            break;
+        default:
+            break;
+    }
+    return RET_OK;
+}
+
+
+static ret_t widget_tree_focus_set_cb_(widget_tree_focus_manager_t *manager, enWidgetTreeFocusEvent treefocusEvent, widget_tree_focus_cb_t cb, void *ctx, event_t *e)
+{   
+    return_value_if_fail(manager != NULL, RET_BAD_PARAMS);
+    switch(treefocusEvent){
+        case kNoChildrenFocusable:
+            manager->on_no_children_focusable.cb = cb;
+            manager->on_no_children_focusable.ctx = ctx;
+            manager->on_no_children_focusable.e = e;
+            break;
+        case kNoParentsFocusable:
+            manager->on_no_parents_focusable.cb = cb;
+            manager->on_no_parents_focusable.ctx = ctx;
+            manager->on_no_parents_focusable.e = e;
+            break;
+        default:
+            break;
+    }
+    return RET_OK;
+}
+
 widget_tree_focus_manager_t* widget_tree_focus_manager_create(widget_t *win){
     return_value_if_fail(win != NULL, NULL);
     widget_tree_focus_manager_t *manager = TKMEM_ZALLOC(widget_tree_focus_manager_t);
     manager->win = win;
+    widget_tree_focus_set_cb_(manager, kNoChildrenFocusable, on_no_focusable_children_default, NULL, NULL);
+    widget_tree_focus_set_cb_(manager, kNoParentsFocusable, on_no_focusable_parent_default, NULL, NULL);
     manager->g_focus_widget_list_stack = darray_create(10, NULL, NULL);
     manager->g_focus_widget_stack = darray_create(10, NULL, NULL);
     return manager;
@@ -74,10 +131,12 @@ ret_t widget_tree_focus_move_parent(widget_tree_focus_manager_t* manager, widget
     ret_t ret = RET_OK;
     if (g_focus_widget_list_stack->size == 0)
     {
-        printf("no focusable parent widget\r\n");
+        widget_tree_focus_cb_info_t *info = &manager->on_no_parents_focusable;
+        if(info->cb){
+            info->cb(info->ctx, info->e);
+        }
         return RET_STOP;
     }
-    /* 恢复父层控件的可聚焦性 */
     darray_t *parent_focusable_widget_list = darray_pop(g_focus_widget_list_stack);
     focused_widget = darray_pop(g_focus_widget_stack);
     ret = widget_set_all_focusable(parent_focusable_widget_list, TRUE);
@@ -98,7 +157,6 @@ ret_t widget_tree_focus_move_children(widget_tree_focus_manager_t* manager, widg
     /* parent_focusable_widget_list的生命周期：在widget_tree_focus_move_children创建， 赋值入栈，在widget_tree_focus_move_parent出栈，销毁 */
     darray_t *parent_focusable_widget_list = darray_create(10, NULL, NULL);
     widget_get_all_focusable_widgets(win, parent_focusable_widget_list);
-    
     /* child_focusable_widget_list的生命周期：比较简单，本函数内创建赋值，完成查找所有可聚焦子控件的任务后销毁 */
     darray_t *child_focusable_widget_list = darray_create(10, NULL, NULL);
     widget_get_all_focusable_widgets(focused_widget, child_focusable_widget_list);
@@ -111,14 +169,17 @@ ret_t widget_tree_focus_move_children(widget_tree_focus_manager_t* manager, widg
         widget_set_all_focusable(child_focusable_widget_list, TRUE);
         widget_set_all_focused(parent_focusable_widget_list, FALSE);
         widget_set_focused(WIDGET(child_focusable_widget_list->elms[0]), TRUE);
-        
+
         /* 保存这些取消聚焦的控件列表和前一个聚焦控件，以便在widget_tree_focus_move_parent中出栈恢复 */
         darray_push(g_focus_widget_list_stack, parent_focusable_widget_list);
         darray_push(g_focus_widget_stack, focused_widget);
     }
     else
     {
-        printf("no focusable child widget\r\n");
+        widget_tree_focus_cb_info_t *info = &manager->on_no_children_focusable;
+        if(info->cb){
+            info->cb(info->ctx, info->e);
+        }
     }
     ret = darray_destroy(child_focusable_widget_list);
     return ret;
@@ -126,11 +187,16 @@ ret_t widget_tree_focus_move_children(widget_tree_focus_manager_t* manager, widg
 
 ret_t widget_tree_focus_manager_destroy(widget_tree_focus_manager_t *manager)
 {
-    if(manager == NULL){
+    if(manager == NULL)
         return RET_OK;
-    }
     darray_destroy(manager->g_focus_widget_stack);
     darray_destroy(manager->g_focus_widget_list_stack);
     TKMEM_FREE(manager);
     return RET_OK;
+}
+
+widget_tree_focus_manager_t* widget_tree_focus_manager_get_from_window(widget_t *win)
+{  
+    return_value_if_fail(win != NULL, NULL);
+    return WINDOW_BASE(win)->tree_focus_manager;
 }
